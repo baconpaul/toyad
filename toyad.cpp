@@ -10,156 +10,145 @@ std::string nextsym( const char* pfx )
   return ss.str();
 }
 
+void print_node_and_derivs( Node::ptr_t &r )
+{
+  Node::childset_t vars = r->find_children_of_type< Variable >();
+  std::cout << "----------------------------------" << std::endl;
+  std::cout << "r := " << r << std::endl;
+  std::cout << "given:\n";
+  for( auto it = vars.begin(); it != vars.end(); ++it )
+    {
+      std::cout << "     " << *it << " = " << (*it)->getvalue() << std::endl;
+    }
+  std::cout << "find:\n";
+  std::cout << "     r = " << r->getvalue() << std::endl;
+
+  for( auto it = vars.begin(); it != vars.end(); ++it )
+    {
+      std::cout << " dr/d" << *it << " = " << (*it)->getderiv() << std::endl;
+    }
+  
+}
+
 
 void super_simple()
 {
-  Node::ptr_t thr = Constant::make( 3 );
-  Node::ptr_t x   = Variable::make( "x" );
-  Node::ptr_t r   = Mul::make( x, thr );
+  auto x   = Variable::make( "x" );
+  auto r   = x * 3;
+  
   Node::context_t ctx;
-  ctx[ x->name() ] = 3;
+  ctx[ x->name() ] = 4;
+  
   r->fwd_eval( ctx );
+  r->bkw_deriv_eval( 1.0 );
 
-  std::cout << "r := " << r << std::endl;
-  std::cout << "given     x = " << x->get() << std::endl;
-  std::cout << "find      r = " << r->get() << std::endl;
-
-  //r->bkw_deriv_eval( 1.0 );
-  //std::cout << "and   df/dx = " << x->getderiv() << std::endl;
+  print_node_and_derivs( r );
 }
 
 void xpx()
 {
-  Node::ptr_t x   = Variable::make( "x" );
-  Node::ptr_t r   = Plus::make( x, x );
+  auto x   = Variable::make( "x" );
+  auto r   = x + x;
+  
   Node::context_t ctx;
   ctx[ x->name() ] = 3;
+
   r->fwd_eval( ctx );
-
-  std::cout << "r := " << r << std::endl;
-  std::cout << "given     x = " << x->get() << std::endl;
-  std::cout << "find      r = " << r->get() << std::endl;
-
   r->bkw_deriv_eval( 1.0 );
-  std::cout << "and   df/dx = " << x->getderiv() << std::endl;
 
+  print_node_and_derivs( r );
 }
 
 void spoly()
 {
-  Node::ptr_t x   = Variable::make( "x" );
-  Node::ptr_t x2  = Mul::make( x, x );
-  Node::ptr_t r   = Minus::make( x2, x );
+  auto x   = Variable::make( "x" );
+  auto r   = x * x - x;
+  
   Node::context_t ctx;
   ctx[ x->name() ] = 3;
+
   r->fwd_eval( ctx );
-
-  std::cout << "r := ";
-  r->print( std::cout );
-  std::cout << std::endl;
-  std::cout << "given     x = " << x->get() << std::endl;
-  std::cout << "find      r = " << r->get() << std::endl;
-
   r->bkw_deriv_eval( 1.0 );
-  std::cout << "and   df/dx = " << x->getderiv() << std::endl;
 
+  print_node_and_derivs( r );
 }
 
 void divsum()
 {
-  Node::ptr_t x   = Variable::make( "x" );
-  Node::ptr_t c2  = Constant::make( 2 );
-  Node::ptr_t xp2 = Plus::make( x, c2 );
-  Node::ptr_t r   = Div::make( xp2, x );
-
+  auto x   = Variable::make( "x" );
+  auto r   = ( x + 2 ) / x;
+  
   Node::context_t ctx;
   ctx[ x->name() ] = 4;
+  
   r->fwd_eval( ctx );
-
-  std::cout << "r := ";
-  r->print( std::cout );
-  std::cout << std::endl;
-  std::cout << "given     x = " << x->get() << std::endl;
-  std::cout << "find      r = " << r->get() << std::endl;
-
   r->bkw_deriv_eval( 1.0 );
-  std::cout << "and   df/dx = " << x->getderiv() << std::endl;
+
+  print_node_and_derivs( r );
+
 }
 
 void multivar()
 {
-  Node::ptr_t x = Variable::make( "x" );
-  Node::ptr_t y = Variable::make( "y" );
-
-  Node::ptr_t x2 = Mul::make( x, x );
-  Node::ptr_t xy = Mul::make( x, y );
-
-  Node::ptr_t r  = Plus::make( x2, xy );
+  auto x = Variable::make( "x" );
+  auto y = Variable::make( "y" );
+  auto r = x * x + x * y;
 
   Node::context_t ctx;
   ctx[ x->name() ] = 2;
   ctx[ y->name() ] = 3;
+  
   r->fwd_eval( ctx );
-
-  std::cout << "r := " << r << std::endl;
-  std::cout << "given     x = " << x->get() << std::endl;
-  std::cout << "          x = " << y->get() << std::endl;
-  std::cout << "find      r = " << r->get() << std::endl;
-
   r->bkw_deriv_eval( 1.0 );
-  std::cout << "and   df/dx = " << x->getderiv() << std::endl;
-  std::cout << "and   df/dy = " << y->getderiv() << std::endl;
+
+  print_node_and_derivs( r );
+  
+  
+  r->invalidate();
 
   ctx[ x->name() ] = 7;
   ctx[ y->name() ] = -1;
-  r->invalidate();
   r->fwd_eval( ctx );
-
-  std::cout << "r := " << r << std::endl;
-  std::cout << "given     x = " << x->get() << std::endl;
-  std::cout << "          y = " << y->get() << std::endl;
-  std::cout << "find      r = " << r->get() << std::endl;
-
   r->bkw_deriv_eval( 1.0 );
-  std::cout << "and   df/dx = " << x->getderiv() << std::endl;
-  std::cout << "and   df/dy = " << y->getderiv() << std::endl;
+
+  print_node_and_derivs( r );
 }
 
 void polynomial()
 {
-  Node::ptr_t x   = Variable::make( "x" );
-  Node::ptr_t r  = WeightedPoly::make( 1, x, 3 );
-
-  
+  auto x   = Variable::make( "x" );
+  auto r   = 3 * (x^3) + 4 * (x^2) - 7 * x;
+ 
   Node::context_t ctx;
   ctx[ x->name() ] = 2;
+  
   r->fwd_eval( ctx );
-
-  std::cout << "r := " << r << std::endl;
-  std::cout << "given     x = " << x->get() << std::endl;
-  std::cout << "find      r = " << r->get() << std::endl;
-
   r->bkw_deriv_eval( 1.0 );
-  std::cout << "and   df/dx = " << x->getderiv() << std::endl;
 
+  print_node_and_derivs( r );
+}
+
+void specials()
+{
+  auto x = Variable::make( "x" );
+  auto r = exp( x * 2 );
+
+  Node::context_t ctx;
+  ctx[ x->name() ] = 3;
+
+  r->fwd_eval( ctx );
+  r->bkw_deriv_eval( 1.0 );
+
+  print_node_and_derivs( r );
 }
 
 int main( int , char ** )
 {
-  std::cout << "------------\n";
   super_simple();
-#if 0
-
-  std::cout << "------------\n";
   xpx();
-  std::cout << "------------\n";
   spoly();
-  std::cout << "------------\n";
   divsum();
-  std::cout << "------------\n";
   multivar();
-  std::cout << "------------\n";
   polynomial();
-#endif
-  
+  specials();
 }

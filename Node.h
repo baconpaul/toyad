@@ -5,6 +5,7 @@
 #include <memory>
 #include <map>
 #include <vector>
+#include <set>
 #include <algorithm>
 #include <sstream>
 #include <math.h>
@@ -17,6 +18,7 @@ public:
   typedef std::shared_ptr< Node > ptr_t;
   typedef std::map< std::string, double > context_t;
   typedef std::vector< ptr_t > children_t;
+  typedef std::set< ptr_t > childset_t;
   typedef double value_t;
 
 protected:
@@ -32,6 +34,11 @@ protected:
   Node( const char* pfx )
   {
     _name = nextsym( pfx );
+    reset();
+  }
+
+  void reset()
+  {
     _value = 0;
     _dvalue = 0;
 
@@ -43,7 +50,7 @@ public:
   virtual void bkw_deriv_eval( const value_t &d ) = 0;
   
   virtual std::string name() const { return _name; }
-  virtual value_t get()
+  virtual value_t getvalue()
   {
     return _value;
   }
@@ -55,11 +62,33 @@ public:
   virtual std::ostream& print( std::ostream &os ) const = 0;
   virtual children_t children() { return children_t(); }
 
+  // Make this a set not a list, since traversal can get there multiple times
+  virtual childset_t find_children_by(std::function<bool (ptr_t)> filt)
+  {
+    childset_t res;
+    children_t kids = children();
+    for( auto it = kids.begin(); it != kids.end(); ++it )
+      {
+        if( filt( *it ) ) res.insert( *it );
+        else {
+          childset_t kfind = (*it)->find_children_by( filt );
+          res.insert( kfind.begin(), kfind.end() );
+        }
+      }
+    return res;
+  }
+
+  template< typename T >
+    childset_t find_children_of_type()
+    {
+      return find_children_by( []( ptr_t a ) { return dynamic_cast<T*>(a.get()) != NULL; } );
+    }
+
   virtual void invalidate()
   {
     if( ! _vstale )
       {
-	_vstale = true;
+        reset();
 	children_t kids = children();
 	for( auto it = kids.begin(); it<kids.end(); ++it )
 	  (*it)->invalidate();
@@ -168,7 +197,7 @@ public:
       {
 	_a->fwd_eval( ctx );
 	_b->fwd_eval( ctx );
-	_value = _bop( _a->get(), _b->get() );
+	_value = _bop( _a->getvalue(), _b->getvalue() );
 	_vstale = false;
       }
   }
@@ -198,7 +227,7 @@ public:
     // f = q = x + y
     //
     // so if df/dq = t
-    // then df/dx = df/dq dq/dy = df/dq
+    // then df/dx = df/dq dq/dx = df/dq since dq/dx = 1
     // and  df/dy = df/dq dq/dy = df/dq
     _dvalue += t;
     _a->bkw_deriv_eval( t );
@@ -251,8 +280,8 @@ public:
     // then df/da = df/dq dq/da = df/dq * b
     // and  df/db = df/dq dq/db = df/dq * a
     _dvalue += t;
-    _a->bkw_deriv_eval( t * _b->get() );
-    _b->bkw_deriv_eval( t * _a->get() );
+    _a->bkw_deriv_eval( t * _b->getvalue() );
+    _b->bkw_deriv_eval( t * _a->getvalue() );
   }
   virtual std::string getopstr() const { return "*"; }
 };
@@ -276,8 +305,8 @@ class Div : public BinOp
     // then df/da = df/dq dq/da = df/dq / b
     // and  df/db = df/dq dq/db = df/dq * ( - a / b^2 )
     _dvalue += t;
-    _a->bkw_deriv_eval( t / _b->get() );
-    _b->bkw_deriv_eval( - t * _a->get() / ( _b->get() * _b->get() ));
+    _a->bkw_deriv_eval( t / _b->getvalue() );
+    _b->bkw_deriv_eval( - t * _a->getvalue() / ( _b->getvalue() * _b->getvalue() ));
   }
   virtual std::string getopstr() const { return "/"; }
 };
@@ -306,7 +335,7 @@ public:
     if( _vstale )
       {
 	_x->fwd_eval( ctx );
-	_value = _a * pow( _x->get(), _m );
+	_value = _a * pow( _x->getvalue(), _m );
 	_vstale = false;
       }
   }
@@ -318,17 +347,188 @@ public:
     // so if df/dq = t
     // then df/dx = df/dq dq/dx = df/dq (a * m * x^(m-1) )
     _dvalue += t;
-    _x->bkw_deriv_eval( t * _a * _m * pow( _x->get(), _m - 1 ) );
+    _x->bkw_deriv_eval( t * _a * _m * pow( _x->getvalue(), _m - 1 ) );
   }
   
   virtual std::ostream& print( std::ostream &os ) const
   {
-    os << _a << " " << _x << "^" << _m;
+    if( _a != 1 )
+      os << _a << " ";
+    os  << _x << "^" << _m;
     return os;
   }
 
   virtual children_t children() { return _children; }
-
 };
+
+class SpecialFunction : public Node
+{
+ public:
+  typedef enum op_t { EXP, SIN, COS } op_t; // TAN ASIN ACOS ATAN SINH COSH TANH EXP etc
+ protected:
+  op_t _op;
+  ptr_t _x;
+  children_t _children;
+  
+ SpecialFunction( op_t op, ptr_t x ) : Node( "special" ), _op( op ), _x( x ), _children()
+    {
+      _children.push_back( _x );
+    }
+ public:
+  static ptr_t make( op_t op, ptr_t x )
+  {
+    return ptr_t( new SpecialFunction( op, x ) );
+  }
+
+  virtual void fwd_eval( const context_t &ctx )
+  {
+    if( _vstale )
+      {
+        _x->fwd_eval( ctx );
+
+        switch( _op )
+          {
+          case EXP:
+            _value = exp( _x->getvalue() );
+            break;
+            
+          case SIN:
+            _value = sin( _x->getvalue() );
+            break;
+          case COS:
+            _value = cos( _x->getvalue() );
+            break;
+          }
+        _vstale = false;
+      }
+  }
+
+  virtual void bkw_deriv_eval( const value_t &t )
+  {
+    // f = q = sin( x )
+    // df/dq = t
+    // df/dx = df/dq dq/dx = df/dq * cos( x )
+    // and so on
+    _dvalue += t;
+    double dqdx = 0;
+    switch( _op )
+      {
+      case EXP:
+        dqdx = exp( _x->getvalue() ); break;
+      case SIN:
+        dqdx = cos( _x->getvalue() ); break;
+      case COS:
+        dqdx = - sin( _x->getvalue() ); break;
+      }
+    _x->bkw_deriv_eval( t * dqdx );
+  }
+  
+  virtual std::ostream& print( std::ostream &os ) const
+  {
+    switch( _op )
+      {
+      case EXP:
+        os << "exp"; break;
+      case SIN:
+        os << "sin"; break;
+      case COS:
+        os << "cos"; break;
+      }
+    os << "( " << _x << " )";
+    return os;
+  }
+
+  virtual children_t children() { return _children; }
+};
+
+// Operators
+Node::ptr_t operator+( const Node::ptr_t &n, double v )
+{
+  Node::ptr_t vn = Constant::make( v );
+  return Plus::make( n, vn );
+}
+
+Node::ptr_t operator+( double v, const Node::ptr_t &n )
+{
+  Node::ptr_t vn = Constant::make( v );
+  return Plus::make( vn, n );
+}
+
+Node::ptr_t operator+( const Node::ptr_t &a, const Node::ptr_t &b )
+{
+  return Plus::make( a, b );
+}
+
+Node::ptr_t operator-( const Node::ptr_t &n, double v )
+{
+  Node::ptr_t vn = Constant::make( v );
+  return Minus::make( n, vn );
+}
+
+Node::ptr_t operator-( double v, const Node::ptr_t &n )
+{
+  Node::ptr_t vn = Constant::make( v );
+  return Minus::make( vn, n );
+}
+
+Node::ptr_t operator-( const Node::ptr_t &a, const Node::ptr_t &b )
+{
+  return Minus::make( a, b );
+}
+
+Node::ptr_t operator*( const Node::ptr_t &n, double v )
+{
+  Node::ptr_t vn = Constant::make( v );
+  return Mul::make( n, vn );
+}
+
+Node::ptr_t operator*( double v, const Node::ptr_t &n )
+{
+  Node::ptr_t vn = Constant::make( v );
+  return Mul::make( vn, n );
+}
+
+Node::ptr_t operator*( const Node::ptr_t &a, const Node::ptr_t &b )
+{
+  return Mul::make( a, b );
+}
+
+Node::ptr_t operator/( const Node::ptr_t &n, double v )
+{
+  Node::ptr_t vn = Constant::make( v );
+  return Div::make( n, vn );
+}
+
+Node::ptr_t operator/( double v, const Node::ptr_t &n )
+{
+  Node::ptr_t vn = Constant::make( v );
+  return Div::make( vn, n );
+}
+
+Node::ptr_t operator/( const Node::ptr_t &a, const Node::ptr_t &b )
+{
+  return Div::make( a, b );
+}
+
+Node::ptr_t operator^( const Node::ptr_t &a, int n )
+{
+  return WeightedPoly::make( 1, a, n );
+}
+
+
+Node::ptr_t exp( const Node::ptr_t &a )
+{
+  return SpecialFunction::make( SpecialFunction::EXP, a );
+}
+
+Node::ptr_t sin( const Node::ptr_t &a )
+{
+  return SpecialFunction::make( SpecialFunction::SIN, a );
+}
+
+Node::ptr_t cos( const Node::ptr_t &a )
+{
+  return SpecialFunction::make( SpecialFunction::COS, a );
+}
 
 #endif

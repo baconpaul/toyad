@@ -8,3 +8,7 @@ OBJS=toyad.o
 
 toyad:	$(OBJS)
 	clang -g -std=c++14 -lstdc++ -o toyad toyad.cpp
+
+clean:
+	rm -f toyad *.o 
+	rm -rf toyad.dSYM
